@@ -2,6 +2,7 @@ from piazza_api import Piazza
 from time import sleep
 import json
 import os
+import argparse
 
 def filter_child_post(raw_post):
     post = {}
@@ -36,10 +37,10 @@ def filter_post(raw_post):
         post["responses"].append(filter_child_post(response))
     return post
 
-def get_post_json():
-    if not os.path.exists("raw_posts.json"):
+def get_post_json(starter_file):
+    if not os.path.exists(starter_file):
         return {"posts": [], "most_recent": 0, "count": 0}
-    with open("raw_posts.json", "r") as f:
+    with open(starter_file, "r") as f:
         return json.load(f)
     
 def filter_raw_json(raw_json):
@@ -55,14 +56,29 @@ def filter_raw_json(raw_json):
     return filtered_posts_json
 
 def main():
-    post_json = get_post_json()
+    parser = argparse.ArgumentParser(description="Piazza Post Parser")
+    parser.add_argument("starter_file", type=str, help="The file to store the raw posts. If the file exists, the script will continue from the most recent post and append to the file.")
+    parser.add_argument("--network_id", type=str, help="The network ID of the Piazza class")
+    parser.add_argument("--max_posts", type=int, help="The maximum number of posts to get")
+    args = parser.parse_args()
+
+    starter_file = args.starter_file
+    post_json = get_post_json(starter_file)
     i = post_json["most_recent"] + 1
 
     p = Piazza()
     p.user_login()
 
-    network_id = input("Enter the network ID (https://piazza.com/class/[THIS ID]/): ")
+    network_id = ""
+    if args.network_id:
+        network_id = args.network_id
+    else:
+        network_id = input("Enter the network ID (https://piazza.com/class/[THIS ID]/): ")
     course = p.network(network_id)
+
+    max_posts = None
+    if args.max_posts:
+        max_posts = args.max_posts
 
     print("Getting posts...")
     try:
@@ -73,22 +89,19 @@ def main():
                 post_json["posts"].append(post)
                 sleep(0.25)
                 i += 1
+                if max_posts and i >= max_posts:
+                    break
             except Exception as e:
                 error_string = str(e)
-                if "cannot be found" in error_string:
-                    # Once we reach a post that cannot be found, we assume that
-                    # we have reached the end of the posts
-                    print("No more posts to get.")
-                    break
-                elif "Not permitted" in error_string:
-                    # Ignore posts that are not permitted
+                print(e)
+                if "cannot be found" in error_string or "Not permitted" in error_string:
+                    # Ignore posts that cannot be found or are not permitted
                     i += 1
                     continue
                 else:
                     # If we get an error that is not one of the above, print the
                     # error and try again
                     sleep(2)
-                    print(e)
                     continue
 
     except KeyboardInterrupt:
@@ -98,14 +111,15 @@ def main():
     post_json["most_recent"] = i - 1
     post_json["count"] = len(post_json["posts"])
 
-    with open("raw_posts.json", "w") as f:
+    with open(starter_file, "w") as f:
         json.dump(post_json, f, indent=2)
-        print("Saved raw posts to raw_posts.json")
+        print("Saved raw posts to: " + starter_file)
 
     filtered_posts_json = filter_raw_json(post_json)
-    with open("filtered_posts.json", "w") as f:
+    filtered_file = starter_file.split(".")[0] + "_filtered.json"
+    with open(filtered_file, "w") as f:
         json.dump(filtered_posts_json, f, indent=2)
-        print("Saved filtered posts to filtered_posts.json")
+        print("Saved filtered posts to: " + filtered_file)
 
     print("Done!")
 
